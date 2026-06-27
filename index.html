@@ -32,7 +32,7 @@
             </div>
             <div id="register-form" style="display:none">
                 <input type="text" id="reg-username" placeholder="用户名" class="input-field" autocomplete="username">
-                <input type="tel" id="reg-phone" placeholder="手机号码" class="input-field" autocomplete="tel">
+                <input type="tel" id="reg-phone" placeholder="手机号码（e.g. 011-1234 5678）" class="input-field" autocomplete="tel">
                 <input type="password" id="reg-password" placeholder="密码（至少6位）" class="input-field" autocomplete="new-password">
                 <input type="password" id="reg-confirm" placeholder="确认密码" class="input-field" autocomplete="new-password">
                 <button class="btn btn-white btn-full" id="btn-register">注册</button>
@@ -72,6 +72,18 @@
                 <i class="fas fa-search" style="margin-right:8px"></i>搜索行程
             </button>
         </div>
+        <div class="popular-routes">
+            <div class="popular-label">热门路线</div>
+            <div class="route-chips">
+                <button class="route-chip" data-from="Kuala Lumpur" data-to="Penang">KL → Penang</button>
+                <button class="route-chip" data-from="Kuala Lumpur" data-to="Johor Bahru">KL → JB</button>
+                <button class="route-chip" data-from="Kuala Lumpur" data-to="Ipoh">KL → Ipoh</button>
+                <button class="route-chip" data-from="Kuala Lumpur" data-to="Melaka">KL → Melaka</button>
+                <button class="route-chip" data-from="Kuala Lumpur" data-to="Kuantan">KL → Kuantan</button>
+                <button class="route-chip" data-from="Penang" data-to="Johor Bahru">Penang → JB</button>
+            </div>
+        </div>
+
         <div class="section-header">
             <span class="section-title">可用行程</span>
             <button class="text-btn" id="btn-clear-search" style="display:none">清除搜索</button>
@@ -93,14 +105,14 @@
             <div class="route-form-card">
                 <div class="form-group">
                     <label><i class="fas fa-circle from-icon"></i> 出发地</label>
-                    <input type="text" id="post-from" placeholder="请输入出发城市或地点" class="input-field">
+                    <input type="text" id="post-from" placeholder="e.g. Kuala Lumpur" class="input-field" list="city-list">
                 </div>
                 <div class="route-swap-area">
                     <div class="route-connector"></div>
                 </div>
                 <div class="form-group">
                     <label><i class="fas fa-map-marker-alt to-icon"></i> 目的地</label>
-                    <input type="text" id="post-to" placeholder="请输入目的城市或地点" class="input-field">
+                    <input type="text" id="post-to" placeholder="e.g. Penang" class="input-field" list="city-list">
                 </div>
             </div>
             <div class="form-row mt-12">
@@ -128,10 +140,37 @@
                     <input type="number" id="post-price" placeholder="0（免费）" class="input-field" min="0" step="1">
                 </div>
             </div>
+            <div id="price-suggestion" class="price-suggestion" style="display:none">
+                <i class="fas fa-lightbulb"></i>
+                <span id="price-suggestion-text"></span>
+            </div>
             <div class="form-group">
                 <label>行程说明（选填）</label>
-                <textarea id="post-note" placeholder="例如：准时出发、可放行李、联系方式等..." class="input-field textarea"></textarea>
+                <textarea id="post-note" placeholder="例如：准时出发、可放行李、WhatsApp 联系方式等..." class="input-field textarea"></textarea>
             </div>
+
+            <datalist id="city-list">
+                <option value="Kuala Lumpur">
+                <option value="Penang">
+                <option value="Johor Bahru">
+                <option value="Ipoh">
+                <option value="Melaka">
+                <option value="Kuantan">
+                <option value="Kota Bharu">
+                <option value="Kuching">
+                <option value="Kota Kinabalu">
+                <option value="Alor Setar">
+                <option value="Seremban">
+                <option value="Shah Alam">
+                <option value="Petaling Jaya">
+                <option value="Subang Jaya">
+                <option value="Klang">
+                <option value="Putrajaya">
+                <option value="Cyberjaya">
+                <option value="Taiping">
+                <option value="Sitiawan">
+                <option value="Butterworth">
+            </datalist>
             <button class="btn btn-primary btn-full" id="btn-post">
                 <i class="fas fa-plus" style="margin-right:8px"></i>发布行程
             </button>

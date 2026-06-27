@@ -13,11 +13,67 @@ const K = {
     USER:     'cp_user',
 };
 
+// ===== Malaysia Route Data =====
+// Key: "city1|city2" (alphabetical order), value: { km, min, max } per seat
+const MY_ROUTES = {
+    'ipoh|kuala lumpur':       { km: 205,  min: 25, max: 35 },
+    'ipoh|penang':             { km: 170,  min: 20, max: 28 },
+    'ipoh|johor bahru':        { km: 510,  min: 55, max: 75 },
+    'ipoh|melaka':             { km: 310,  min: 35, max: 48 },
+    'johor bahru|kuala lumpur':{ km: 340,  min: 38, max: 55 },
+    'johor bahru|melaka':      { km: 215,  min: 25, max: 35 },
+    'johor bahru|penang':      { km: 700,  min: 75, max: 100 },
+    'johor bahru|kuantan':     { km: 390,  min: 42, max: 60 },
+    'kuala lumpur|melaka':     { km: 148,  min: 18, max: 28 },
+    'kuala lumpur|penang':     { km: 370,  min: 42, max: 60 },
+    'kuala lumpur|kuantan':    { km: 255,  min: 30, max: 42 },
+    'kuala lumpur|kota bharu': { km: 470,  min: 50, max: 70 },
+    'kuala lumpur|seremban':   { km: 68,   min: 10, max: 15 },
+    'kuala lumpur|taiping':    { km: 290,  min: 32, max: 45 },
+    'kuala lumpur|alor setar': { km: 460,  min: 50, max: 68 },
+    'melaka|penang':           { km: 490,  min: 52, max: 70 },
+    'penang|kota bharu':       { km: 340,  min: 38, max: 55 },
+};
+
+// City aliases for fuzzy matching
+const CITY_ALIASES = {
+    'kl': 'kuala lumpur',
+    'jb': 'johor bahru',
+    'pg': 'penang',
+    'georgetown': 'penang',
+    'butterworth': 'penang',
+    'malacca': 'melaka',
+    'kb': 'kota bharu',
+    'kkb': 'kuala kubu bharu',
+    'pj': 'petaling jaya',
+    'sa': 'shah alam',
+};
+
+function normalizeCity(name) {
+    const lower = name.trim().toLowerCase();
+    return CITY_ALIASES[lower] || lower;
+}
+
+function getRouteSuggestion(from, to) {
+    const a = normalizeCity(from);
+    const b = normalizeCity(to);
+    const key1 = [a, b].sort().join('|');
+    if (MY_ROUTES[key1]) return MY_ROUTES[key1];
+    // Partial match
+    for (const [k, v] of Object.entries(MY_ROUTES)) {
+        const [c1, c2] = k.split('|');
+        if ((a.includes(c1) || c1.includes(a)) && (b.includes(c2) || c2.includes(b))) return v;
+        if ((a.includes(c2) || c2.includes(a)) && (b.includes(c1) || c1.includes(b))) return v;
+    }
+    // Generic estimate: RM0.14/km per seat
+    return null;
+}
+
 // ===== State =====
-let currentUser  = DB.getObj(K.USER);
-let detailMap    = null;
+let currentUser   = DB.getObj(K.USER);
+let detailMap     = null;
 let currentRideId = null;
-let activeSearch = null; // null = show all
+let activeSearch  = null;
 
 // ===== Utilities =====
 function uid() {
@@ -34,21 +90,24 @@ function showToast(msg, duration = 2200) {
 
 function fmtDate(str) {
     if (!str) return '';
-    const d = new Date(str + 'T00:00:00');
-    const days = ['日', '一', '二', '三', '四', '五', '六'];
-    return `${d.getMonth() + 1}月${d.getDate()}日 (周${days[d.getDay()]})`;
+    const d    = new Date(str + 'T00:00:00');
+    const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    return `${d.getDate()} ${months[d.getMonth()]} (${days[d.getDay()]})`;
 }
 
 function fmtTime(str) { return str || ''; }
 
 function initial(name) {
-    if (!name) return '?';
-    // Return first character (works for Chinese names)
-    return name[0].toUpperCase();
+    return name ? name[0].toUpperCase() : '?';
 }
 
 function todayStr() {
     return new Date().toISOString().split('T')[0];
+}
+
+function fmtPrice(price) {
+    return price > 0 ? `RM ${price.toFixed(0)}` : 'Free';
 }
 
 // ===== Navigation =====
@@ -82,15 +141,16 @@ document.querySelectorAll('.auth-tab').forEach(tab => {
 document.getElementById('btn-login').addEventListener('click', () => {
     const username = document.getElementById('login-username').value.trim();
     const password = document.getElementById('login-password').value;
-    if (!username || !password) return showToast('请填写完整信息');
+    if (!username || !password) return showToast('Please fill in all fields');
 
     const user = DB.get(K.USERS).find(u => u.username === username && u.password === password);
-    if (!user) return showToast('用户名或密码错误');
+    if (!user) return showToast('Wrong username or password');
 
     currentUser = user;
     DB.setObj(K.USER, user);
+    document.getElementById('greeting-text').textContent = `你好，${user.username} 👋`;
     showScreen('home');
-    showToast(`欢迎回来，${user.username}！`);
+    showToast(`Welcome back, ${user.username}!`);
 });
 
 document.getElementById('btn-register').addEventListener('click', () => {
@@ -99,20 +159,21 @@ document.getElementById('btn-register').addEventListener('click', () => {
     const password = document.getElementById('reg-password').value;
     const confirm  = document.getElementById('reg-confirm').value;
 
-    if (!username || !phone || !password) return showToast('请填写所有必填项');
-    if (password !== confirm) return showToast('两次密码不一致');
-    if (password.length < 6) return showToast('密码至少需要6位');
+    if (!username || !phone || !password) return showToast('Please fill in all fields');
+    if (password !== confirm)             return showToast('Passwords do not match');
+    if (password.length < 6)             return showToast('Password must be at least 6 characters');
 
     const users = DB.get(K.USERS);
-    if (users.find(u => u.username === username)) return showToast('该用户名已被使用');
+    if (users.find(u => u.username === username)) return showToast('Username already taken');
 
     const user = { id: uid(), username, phone, password };
     users.push(user);
     DB.set(K.USERS, users);
     currentUser = user;
     DB.setObj(K.USER, user);
+    document.getElementById('greeting-text').textContent = `你好，${user.username} 👋`;
     showScreen('home');
-    showToast('注册成功，欢迎加入！');
+    showToast('Account created! Welcome 🎉');
 });
 
 // ===== Bottom Nav =====
@@ -130,8 +191,7 @@ function getPublicRides() {
         .filter(r => {
             if (r.cancelled) return false;
             if (r.driverId === currentUser?.id) return false;
-            const rdt = new Date(`${r.date}T${r.time}`);
-            return rdt >= now;
+            return new Date(`${r.date}T${r.time}`) >= now;
         })
         .sort((a, b) => {
             if (a.date !== b.date) return a.date.localeCompare(b.date);
@@ -146,11 +206,11 @@ function availableSeats(ride) {
 function rideCardHTML(ride) {
     const users      = DB.get(K.USERS);
     const driver     = users.find(u => u.id === ride.driverId);
-    const driverName = driver?.username || '未知司机';
+    const driverName = driver?.username || 'Unknown';
     const seats      = availableSeats(ride);
     const priceHTML  = ride.price > 0
-        ? `<span class="price-tag">¥${ride.price}<span class="unit">/人</span></span>`
-        : `<span class="free-tag">免费</span>`;
+        ? `<span class="price-tag">RM ${ride.price}<span class="unit">/seat</span></span>`
+        : `<span class="free-tag">Free</span>`;
 
     return `
     <div class="ride-card" data-id="${ride.id}">
@@ -165,7 +225,7 @@ function rideCardHTML(ride) {
         <div class="ride-meta">
             <span><i class="fas fa-calendar-alt"></i>${fmtDate(ride.date)}</span>
             <span><i class="fas fa-clock"></i>${fmtTime(ride.time)}</span>
-            <span><i class="fas fa-chair"></i>剩余 <strong>${seats}</strong> 座</span>
+            <span><i class="fas fa-chair"></i>${seats} seat${seats !== 1 ? 's' : ''} left</span>
         </div>
         <div class="ride-footer">
             <div class="driver-info">
@@ -180,7 +240,9 @@ function rideCardHTML(ride) {
 function renderHomeRides() {
     const list  = document.getElementById('rides-list');
     const empty = document.getElementById('no-rides');
-    const rides = activeSearch !== null ? activeSearch : getPublicRides().filter(r => availableSeats(r) > 0);
+    const rides = activeSearch !== null
+        ? activeSearch
+        : getPublicRides().filter(r => availableSeats(r) > 0);
 
     if (rides.length === 0) {
         list.innerHTML = '';
@@ -194,7 +256,34 @@ function renderHomeRides() {
     }
 }
 
-// Search
+// Popular route chips
+document.querySelectorAll('.route-chip').forEach(chip => {
+    chip.addEventListener('click', () => {
+        document.querySelectorAll('.route-chip').forEach(c => c.classList.remove('active'));
+        chip.classList.add('active');
+
+        const from = chip.dataset.from;
+        const to   = chip.dataset.to;
+
+        document.getElementById('search-from').value = from;
+        document.getElementById('search-to').value   = to;
+        document.getElementById('clear-from').style.display = '';
+        document.getElementById('clear-to').style.display   = '';
+
+        // Auto search
+        let rides = getPublicRides().filter(r => availableSeats(r) > 0);
+        rides = rides.filter(r =>
+            r.from.toLowerCase().includes(from.toLowerCase()) &&
+            r.to.toLowerCase().includes(to.toLowerCase())
+        );
+        activeSearch = rides;
+        document.getElementById('btn-clear-search').style.display = '';
+        renderHomeRides();
+        showToast(rides.length > 0 ? `${rides.length} ride(s) found` : 'No rides for this route yet');
+    });
+});
+
+// Search inputs
 const searchFromEl = document.getElementById('search-from');
 const searchToEl   = document.getElementById('search-to');
 
@@ -215,9 +304,7 @@ document.getElementById('clear-to').addEventListener('click', () => {
 });
 
 document.getElementById('btn-swap').addEventListener('click', () => {
-    const tmp = searchFromEl.value;
-    searchFromEl.value = searchToEl.value;
-    searchToEl.value = tmp;
+    [searchFromEl.value, searchToEl.value] = [searchToEl.value, searchFromEl.value];
     document.getElementById('clear-from').style.display = searchFromEl.value ? '' : 'none';
     document.getElementById('clear-to').style.display   = searchToEl.value   ? '' : 'none';
 });
@@ -234,8 +321,9 @@ document.getElementById('btn-search').addEventListener('click', () => {
 
     activeSearch = rides;
     document.getElementById('btn-clear-search').style.display = '';
+    document.querySelectorAll('.route-chip').forEach(c => c.classList.remove('active'));
     renderHomeRides();
-    showToast(rides.length > 0 ? `找到 ${rides.length} 个行程` : '未找到符合条件的行程');
+    showToast(rides.length > 0 ? `${rides.length} ride(s) found` : 'No rides found');
 });
 
 document.getElementById('btn-clear-search').addEventListener('click', () => {
@@ -246,10 +334,36 @@ document.getElementById('btn-clear-search').addEventListener('click', () => {
     document.getElementById('clear-from').style.display = 'none';
     document.getElementById('clear-to').style.display   = 'none';
     document.getElementById('btn-clear-search').style.display = 'none';
+    document.querySelectorAll('.route-chip').forEach(c => c.classList.remove('active'));
     renderHomeRides();
 });
 
-// ===== Post Ride =====
+// ===== Post Ride — Price Suggestion =====
+function updatePriceSuggestion() {
+    const from = document.getElementById('post-from').value.trim();
+    const to   = document.getElementById('post-to').value.trim();
+    const box  = document.getElementById('price-suggestion');
+    const txt  = document.getElementById('price-suggestion-text');
+
+    if (!from || !to) { box.style.display = 'none'; return; }
+
+    const route = getRouteSuggestion(from, to);
+    if (route) {
+        txt.textContent = `建议价格：RM ${route.min}–${route.max} / 人（约 ${route.km} km）`;
+        box.style.display = '';
+        // Auto-fill price if empty
+        const priceEl = document.getElementById('post-price');
+        if (!priceEl.value) {
+            priceEl.value = Math.round((route.min + route.max) / 2);
+        }
+    } else {
+        box.style.display = 'none';
+    }
+}
+
+document.getElementById('post-from').addEventListener('change', updatePriceSuggestion);
+document.getElementById('post-to').addEventListener('change', updatePriceSuggestion);
+
 document.getElementById('btn-post').addEventListener('click', () => {
     if (!currentUser) return showScreen('auth');
 
@@ -261,11 +375,9 @@ document.getElementById('btn-post').addEventListener('click', () => {
     const price = parseFloat(document.getElementById('post-price').value) || 0;
     const note  = document.getElementById('post-note').value.trim();
 
-    if (!from || !to)   return showToast('请填写出发地和目的地');
-    if (!date || !time) return showToast('请填写出发日期和时间');
-
-    const rideDate = new Date(`${date}T${time}`);
-    if (rideDate < new Date()) return showToast('出发时间不能早于现在');
+    if (!from || !to)   return showToast('Please enter pickup and destination');
+    if (!date || !time) return showToast('Please select date and time');
+    if (new Date(`${date}T${time}`) < new Date()) return showToast('Departure time cannot be in the past');
 
     const ride = {
         id: uid(), driverId: currentUser.id,
@@ -277,12 +389,12 @@ document.getElementById('btn-post').addEventListener('click', () => {
     rides.push(ride);
     DB.set(K.RIDES, rides);
 
-    // Clear form
-    ['post-from', 'post-to', 'post-date', 'post-time', 'post-price', 'post-note']
+    ['post-from','post-to','post-date','post-time','post-price','post-note']
         .forEach(id => { document.getElementById(id).value = ''; });
+    document.getElementById('price-suggestion').style.display = 'none';
 
     activeSearch = null;
-    showToast('行程发布成功！');
+    showToast('Ride posted successfully! 🚗');
     showScreen('home');
 });
 
@@ -296,18 +408,17 @@ async function openRideDetail(rideId) {
 
     const users      = DB.get(K.USERS);
     const driver     = users.find(u => u.id === ride.driverId);
-    const driverName = driver?.username || '未知司机';
+    const driverName = driver?.username || 'Unknown';
     const bookings   = DB.get(K.BOOKINGS);
     const seats      = availableSeats(ride);
     const isDriver   = currentUser && ride.driverId === currentUser.id;
 
-    // Populate fields
     document.getElementById('detail-from').textContent     = ride.from;
     document.getElementById('detail-to').textContent       = ride.to;
-    document.getElementById('detail-datetime').textContent = `${fmtDate(ride.date)} ${fmtTime(ride.time)}`;
+    document.getElementById('detail-datetime').textContent = `${fmtDate(ride.date)} · ${fmtTime(ride.time)}`;
     document.getElementById('detail-driver').textContent   = driverName;
-    document.getElementById('detail-seats').textContent    = `${seats} 座可用 / 共 ${ride.seats} 座`;
-    document.getElementById('detail-price').textContent    = ride.price > 0 ? `¥${ride.price} / 人` : '免费';
+    document.getElementById('detail-seats').textContent    = `${seats} seat${seats !== 1 ? 's' : ''} available / ${ride.seats} total`;
+    document.getElementById('detail-price').textContent    = ride.price > 0 ? `RM ${ride.price} / seat` : 'Free';
 
     const noteCard = document.getElementById('detail-note-card');
     if (ride.note) {
@@ -319,35 +430,36 @@ async function openRideDetail(rideId) {
 
     // Book button
     const bookBtn = document.getElementById('btn-book-ride');
-    bookBtn.disabled = false;
+    bookBtn.disabled    = false;
     bookBtn.style.cssText = '';
-    bookBtn.textContent = '申请乘车';
+    bookBtn.textContent = 'Request to Join';
 
     if (isDriver) {
-        bookBtn.textContent = '这是我的行程';
-        bookBtn.disabled = true;
+        bookBtn.textContent = 'This is your ride';
+        bookBtn.disabled    = true;
 
-        // Show passenger requests
         const rideBookings = bookings.filter(b => b.rideId === rideId);
         const passSection  = document.getElementById('passengers-section');
         if (rideBookings.length > 0) {
             passSection.style.display = '';
             document.getElementById('passengers-list').innerHTML = rideBookings.map(b => {
-                const passenger = users.find(u => u.id === b.passengerId);
-                const name = passenger?.username || '未知';
-                const isPending = b.status === 'pending';
+                const p    = users.find(u => u.id === b.passengerId);
+                const name = p?.username || 'Unknown';
                 return `
                 <div class="booking-request">
                     <div class="driver-info">
                         <div class="avatar">${initial(name)}</div>
-                        <span>${name}</span>
+                        <div>
+                            <div style="font-weight:600;font-size:14px">${name}</div>
+                            ${p?.phone ? `<div style="font-size:12px;color:var(--text-muted)">${p.phone}</div>` : ''}
+                        </div>
                     </div>
                     <div class="booking-actions">
-                        ${isPending
-                            ? `<button class="btn-sm btn-accept" data-bid="${b.id}">接受</button>
-                               <button class="btn-sm btn-reject" data-bid="${b.id}">拒绝</button>`
+                        ${b.status === 'pending'
+                            ? `<button class="btn-sm btn-accept" data-bid="${b.id}">Accept</button>
+                               <button class="btn-sm btn-reject" data-bid="${b.id}">Reject</button>`
                             : `<span class="badge ${b.status === 'accepted' ? 'badge-success' : 'badge-danger'}">
-                                ${b.status === 'accepted' ? '已接受' : '已拒绝'}
+                                ${b.status === 'accepted' ? 'Accepted' : 'Rejected'}
                                </span>`}
                     </div>
                 </div>`;
@@ -355,8 +467,7 @@ async function openRideDetail(rideId) {
 
             document.querySelectorAll('[data-bid]').forEach(btn => {
                 btn.addEventListener('click', () => {
-                    const action = btn.classList.contains('btn-accept') ? 'accepted' : 'rejected';
-                    respondBooking(btn.dataset.bid, action);
+                    respondBooking(btn.dataset.bid, btn.classList.contains('btn-accept') ? 'accepted' : 'rejected');
                 });
             });
         } else {
@@ -367,25 +478,22 @@ async function openRideDetail(rideId) {
         const myBooking = bookings.find(b => b.rideId === rideId && b.passengerId === currentUser?.id);
         if (myBooking) {
             const map = {
-                pending:  ['申请中…', '#7C3AED'],
-                accepted: ['已确认上车 ✓', '#059669'],
-                rejected: ['申请被拒绝', '#DC2626'],
+                pending:  ['Request sent – awaiting driver', '#7C3AED'],
+                accepted: ['Confirmed! See you on board ✓',  '#059669'],
+                rejected: ['Request declined',               '#DC2626'],
             };
-            const [label, color] = map[myBooking.status] || ['已申请', '#888'];
-            bookBtn.textContent = label;
-            bookBtn.disabled    = true;
-            bookBtn.style.background = color;
+            const [label, color] = map[myBooking.status] || ['Requested', '#888'];
+            bookBtn.textContent       = label;
+            bookBtn.disabled          = true;
+            bookBtn.style.background  = color;
         } else if (seats <= 0) {
-            bookBtn.textContent = '座位已满';
-            bookBtn.disabled    = true;
+            bookBtn.textContent      = 'Fully booked';
+            bookBtn.disabled         = true;
             bookBtn.style.background = '#B0BAD4';
         }
     }
 
-    // Show modal
     document.getElementById('modal-ride-detail').classList.add('active');
-
-    // Init map
     setTimeout(() => initDetailMap(ride), 80);
 }
 
@@ -408,7 +516,7 @@ function respondBooking(bookingId, status) {
 
     DB.set(K.BOOKINGS, bookings);
     openRideDetail(currentRideId);
-    showToast(status === 'accepted' ? '已接受乘客申请' : '已拒绝申请');
+    showToast(status === 'accepted' ? 'Passenger accepted ✓' : 'Request declined');
 }
 
 document.getElementById('btn-book-ride').addEventListener('click', () => {
@@ -417,7 +525,7 @@ document.getElementById('btn-book-ride').addEventListener('click', () => {
 
     const bookings = DB.get(K.BOOKINGS);
     if (bookings.find(b => b.rideId === currentRideId && b.passengerId === currentUser.id)) {
-        return showToast('你已经申请过这个行程了');
+        return showToast('You have already requested this ride');
     }
 
     bookings.push({
@@ -426,7 +534,7 @@ document.getElementById('btn-book-ride').addEventListener('click', () => {
         createdAt: Date.now(),
     });
     DB.set(K.BOOKINGS, bookings);
-    showToast('申请已发送，等待司机确认');
+    showToast('Request sent! Waiting for driver to confirm 🙏');
     openRideDetail(currentRideId);
 });
 
@@ -442,8 +550,8 @@ document.getElementById('modal-backdrop').addEventListener('click', closeModal);
 async function geocode(query) {
     try {
         const r = await fetch(
-            `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=json&limit=1`,
-            { headers: { 'Accept-Language': 'zh-CN,zh;q=0.9', 'User-Agent': 'CarpoolApp/1.0' } }
+            `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query + ', Malaysia')}&format=json&limit=1`,
+            { headers: { 'Accept-Language': 'en', 'User-Agent': 'CarpoolMY/1.0' } }
         );
         const data = await r.json();
         if (data.length > 0) return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
@@ -462,38 +570,32 @@ async function initDetailMap(ride) {
     const container = document.getElementById('detail-map');
     if (detailMap) { detailMap.remove(); detailMap = null; }
 
+    // Malaysia center
     detailMap = L.map(container, { zoomControl: false, attributionControl: false });
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        maxZoom: 18,
-    }).addTo(detailMap);
-
-    detailMap.setView([25.0, 121.5], 9);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 18 }).addTo(detailMap);
+    detailMap.setView([4.2, 109.0], 6);
 
     const [fromCoords, toCoords] = await Promise.all([geocode(ride.from), geocode(ride.to)]);
 
     if (fromCoords) {
         L.marker([fromCoords.lat, fromCoords.lng], { icon: makeMarkerIcon('#4F6CF7') })
-            .addTo(detailMap)
-            .bindPopup(`<b>出发</b>: ${ride.from}`);
+            .addTo(detailMap).bindPopup(`<b>From:</b> ${ride.from}`);
     }
     if (toCoords) {
         L.marker([toCoords.lat, toCoords.lng], { icon: makeMarkerIcon('#F97316') })
-            .addTo(detailMap)
-            .bindPopup(`<b>目的</b>: ${ride.to}`);
+            .addTo(detailMap).bindPopup(`<b>To:</b> ${ride.to}`);
     }
-
     if (fromCoords && toCoords) {
         L.polyline(
             [[fromCoords.lat, fromCoords.lng], [toCoords.lat, toCoords.lng]],
-            { color: '#4F6CF7', weight: 3, opacity: 0.75, dashArray: '8 8' }
+            { color: '#4F6CF7', weight: 3, opacity: 0.7, dashArray: '8 8' }
         ).addTo(detailMap);
-
         detailMap.fitBounds(
             L.latLngBounds([fromCoords.lat, fromCoords.lng], [toCoords.lat, toCoords.lng]),
             { padding: [28, 28] }
         );
     } else if (fromCoords) {
-        detailMap.setView([fromCoords.lat, fromCoords.lng], 12);
+        detailMap.setView([fromCoords.lat, fromCoords.lng], 10);
     }
 
     detailMap.invalidateSize();
@@ -505,53 +607,50 @@ function renderMyRides() {
     const bookings = DB.get(K.BOOKINGS);
     const users    = DB.get(K.USERS);
 
-    // Posted rides
-    const myPosted = rides.filter(r => r.driverId === currentUser?.id);
+    // Posted
+    const myPosted = rides.filter(r => r.driverId === currentUser?.id)
+                          .sort((a, b) => b.createdAt - a.createdAt);
     const postedEl = document.getElementById('my-posted-rides');
 
     if (myPosted.length === 0) {
-        postedEl.innerHTML = `<div class="empty-state"><i class="fas fa-road"></i><p>还没有发布行程</p><span>点击"+"发布你的第一个行程</span></div>`;
+        postedEl.innerHTML = `<div class="empty-state"><i class="fas fa-road"></i><p>No rides posted yet</p><span>Tap "+" to post your first ride</span></div>`;
     } else {
-        postedEl.innerHTML = myPosted
-            .sort((a, b) => b.createdAt - a.createdAt)
-            .map(ride => {
-                const seats      = availableSeats(ride);
-                const pending    = bookings.filter(b => b.rideId === ride.id && b.status === 'pending').length;
-                const priceStr   = ride.price > 0 ? `¥${ride.price}/人` : '免费';
-                const pendingBadge = pending > 0
-                    ? `<span class="pending-badge"><i class="fas fa-bell"></i>${pending} 个申请</span>`
-                    : '';
-                return `
-                <div class="ride-card${ride.cancelled ? ' cancelled' : ''}" data-id="${ride.id}">
-                    <div class="ride-route">
-                        <span class="city-name-large">${ride.from}</span>
-                        <div class="route-arrow-area">
-                            <div class="route-line-h"></div>
-                            <i class="fas fa-chevron-right" style="color:var(--secondary);font-size:13px"></i>
-                        </div>
-                        <span class="city-name-large">${ride.to}</span>
+        postedEl.innerHTML = myPosted.map(ride => {
+            const seats   = availableSeats(ride);
+            const pending = bookings.filter(b => b.rideId === ride.id && b.status === 'pending').length;
+            const pendingBadge = pending > 0
+                ? `<span class="pending-badge"><i class="fas fa-bell"></i>${pending} request${pending > 1 ? 's' : ''}</span>` : '';
+            return `
+            <div class="ride-card${ride.cancelled ? ' cancelled' : ''}" data-id="${ride.id}">
+                <div class="ride-route">
+                    <span class="city-name-large">${ride.from}</span>
+                    <div class="route-arrow-area">
+                        <div class="route-line-h"></div>
+                        <i class="fas fa-chevron-right" style="color:var(--secondary);font-size:13px"></i>
                     </div>
-                    <div class="ride-meta">
-                        <span><i class="fas fa-calendar-alt"></i>${fmtDate(ride.date)}</span>
-                        <span><i class="fas fa-clock"></i>${fmtTime(ride.time)}</span>
-                        <span><i class="fas fa-chair"></i>${seats}/${ride.seats} 座</span>
-                    </div>
-                    <div class="ride-footer">
-                        ${pendingBadge || `<span style="font-size:13px;color:var(--text-muted)">${priceStr}</span>`}
-                        ${ride.cancelled
-                            ? '<span class="badge badge-danger">已取消</span>'
-                            : `<button class="cancel-ride-btn" data-cancel="${ride.id}">取消行程</button>`}
-                    </div>
-                </div>`;
-            }).join('');
+                    <span class="city-name-large">${ride.to}</span>
+                </div>
+                <div class="ride-meta">
+                    <span><i class="fas fa-calendar-alt"></i>${fmtDate(ride.date)}</span>
+                    <span><i class="fas fa-clock"></i>${fmtTime(ride.time)}</span>
+                    <span><i class="fas fa-chair"></i>${seats}/${ride.seats} seats</span>
+                    ${ride.price > 0 ? `<span><i class="fas fa-tag"></i>RM ${ride.price}/seat</span>` : '<span><i class="fas fa-gift"></i>Free</span>'}
+                </div>
+                <div class="ride-footer">
+                    ${pendingBadge || '<span></span>'}
+                    ${ride.cancelled
+                        ? '<span class="badge badge-danger">Cancelled</span>'
+                        : `<button class="cancel-ride-btn" data-cancel="${ride.id}">Cancel ride</button>`}
+                </div>
+            </div>`;
+        }).join('');
 
         postedEl.querySelectorAll('.ride-card').forEach(card => {
             card.addEventListener('click', (e) => {
-                if (e.target.dataset.cancel || e.target.closest('[data-cancel]')) return;
+                if (e.target.closest('[data-cancel]')) return;
                 openRideDetail(card.dataset.id);
             });
         });
-
         postedEl.querySelectorAll('[data-cancel]').forEach(btn => {
             btn.addEventListener('click', (e) => {
                 e.stopPropagation();
@@ -560,49 +659,49 @@ function renderMyRides() {
         });
     }
 
-    // Booked rides
-    const myBookings = bookings.filter(b => b.passengerId === currentUser?.id);
+    // Booked
+    const myBookings = bookings.filter(b => b.passengerId === currentUser?.id)
+                               .sort((a, b) => b.createdAt - a.createdAt);
     const bookedEl   = document.getElementById('my-booked-rides');
 
     if (myBookings.length === 0) {
-        bookedEl.innerHTML = `<div class="empty-state"><i class="fas fa-ticket-alt"></i><p>还没有预约记录</p><span>去找一个顺风车吧</span></div>`;
+        bookedEl.innerHTML = `<div class="empty-state"><i class="fas fa-ticket-alt"></i><p>No bookings yet</p><span>Search for a ride to get started</span></div>`;
     } else {
-        bookedEl.innerHTML = myBookings
-            .sort((a, b) => b.createdAt - a.createdAt)
-            .map(booking => {
-                const ride   = rides.find(r => r.id === booking.rideId);
-                if (!ride) return '';
-                const driver = users.find(u => u.id === ride.driverId);
-                const name   = driver?.username || '未知';
-                const statusMap = {
-                    pending:  ['等待确认', 'badge-warning'],
-                    accepted: ['已确认',   'badge-success'],
-                    rejected: ['已拒绝',   'badge-danger'],
-                };
-                const [label, cls] = statusMap[booking.status] || ['未知', 'badge-muted'];
-                return `
-                <div class="ride-card" data-id="${ride.id}">
-                    <div class="ride-route">
-                        <span class="city-name-large">${ride.from}</span>
-                        <div class="route-arrow-area">
-                            <div class="route-line-h"></div>
-                            <i class="fas fa-chevron-right" style="color:var(--secondary);font-size:13px"></i>
-                        </div>
-                        <span class="city-name-large">${ride.to}</span>
+        bookedEl.innerHTML = myBookings.map(booking => {
+            const ride   = rides.find(r => r.id === booking.rideId);
+            if (!ride) return '';
+            const driver = users.find(u => u.id === ride.driverId);
+            const name   = driver?.username || 'Unknown';
+            const statusMap = {
+                pending:  ['Pending',   'badge-warning'],
+                accepted: ['Confirmed', 'badge-success'],
+                rejected: ['Declined',  'badge-danger'],
+            };
+            const [label, cls] = statusMap[booking.status] || ['Unknown', 'badge-muted'];
+            return `
+            <div class="ride-card" data-id="${ride.id}">
+                <div class="ride-route">
+                    <span class="city-name-large">${ride.from}</span>
+                    <div class="route-arrow-area">
+                        <div class="route-line-h"></div>
+                        <i class="fas fa-chevron-right" style="color:var(--secondary);font-size:13px"></i>
                     </div>
-                    <div class="ride-meta">
-                        <span><i class="fas fa-calendar-alt"></i>${fmtDate(ride.date)}</span>
-                        <span><i class="fas fa-clock"></i>${fmtTime(ride.time)}</span>
+                    <span class="city-name-large">${ride.to}</span>
+                </div>
+                <div class="ride-meta">
+                    <span><i class="fas fa-calendar-alt"></i>${fmtDate(ride.date)}</span>
+                    <span><i class="fas fa-clock"></i>${fmtTime(ride.time)}</span>
+                    ${ride.price > 0 ? `<span><i class="fas fa-tag"></i>RM ${ride.price}/seat</span>` : '<span><i class="fas fa-gift"></i>Free</span>'}
+                </div>
+                <div class="ride-footer">
+                    <div class="driver-info">
+                        <div class="avatar">${initial(name)}</div>
+                        <span>${name}</span>
                     </div>
-                    <div class="ride-footer">
-                        <div class="driver-info">
-                            <div class="avatar">${initial(name)}</div>
-                            <span>${name}</span>
-                        </div>
-                        <span class="badge ${cls}">${label}</span>
-                    </div>
-                </div>`;
-            }).join('');
+                    <span class="badge ${cls}">${label}</span>
+                </div>
+            </div>`;
+        }).join('');
 
         bookedEl.querySelectorAll('.ride-card').forEach(card => {
             card.addEventListener('click', () => openRideDetail(card.dataset.id));
@@ -616,11 +715,10 @@ function cancelRide(rideId) {
     if (!ride) return;
     ride.cancelled = true;
     DB.set(K.RIDES, rides);
-    showToast('行程已取消');
+    showToast('Ride cancelled');
     renderMyRides();
 }
 
-// Tabs
 document.querySelectorAll('.tab').forEach(tab => {
     tab.addEventListener('click', () => {
         document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
@@ -641,61 +739,57 @@ function renderProfile() {
     const rides    = DB.get(K.RIDES);
     const bookings = DB.get(K.BOOKINGS);
 
-    const posted    = rides.filter(r => r.driverId === currentUser.id && !r.cancelled).length;
-    const booked    = bookings.filter(b => b.passengerId === currentUser.id).length;
-    const completed = bookings.filter(b => b.passengerId === currentUser.id && b.status === 'accepted').length;
-
-    document.getElementById('stat-posted').textContent    = posted;
-    document.getElementById('stat-booked').textContent    = booked;
-    document.getElementById('stat-completed').textContent = completed;
+    document.getElementById('stat-posted').textContent    = rides.filter(r => r.driverId === currentUser.id && !r.cancelled).length;
+    document.getElementById('stat-booked').textContent    = bookings.filter(b => b.passengerId === currentUser.id).length;
+    document.getElementById('stat-completed').textContent = bookings.filter(b => b.passengerId === currentUser.id && b.status === 'accepted').length;
 }
 
-// Logout (last menu item)
 document.querySelectorAll('.menu-item').forEach((item, i) => {
-    if (i === 3) { // Logout
+    if (i === 3) {
         item.addEventListener('click', () => {
             currentUser = null;
             DB.setObj(K.USER, null);
             showScreen('auth');
-            showToast('已退出登录');
         });
     }
 });
 
-// ===== Demo Data =====
+// ===== Demo Data (Malaysia) =====
 function seedDemoData() {
     const users = DB.get(K.USERS);
-    if (users.length > 0) return; // already seeded
+    if (users.length > 0) return;
 
     const demoId = uid();
-    users.push({ id: demoId, username: 'demo', phone: '0912345678', password: 'demo123' });
+    const d2Id   = uid();
+    users.push(
+        { id: demoId, username: 'demo',    phone: '012-345 6789', password: 'demo123' },
+        { id: d2Id,   username: 'Ahmad',   phone: '011-234 5678', password: 'demo123' },
+    );
     DB.set(K.USERS, users);
 
-    const d0 = todayStr();
-    const d1 = new Date(); d1.setDate(d1.getDate() + 1);
-    const d2 = new Date(); d2.setDate(d2.getDate() + 2);
-    const d3 = new Date(); d3.setDate(d3.getDate() + 3);
-    const fmt = d => d.toISOString().split('T')[0];
+    const addDays = (n) => {
+        const d = new Date(); d.setDate(d.getDate() + n);
+        return d.toISOString().split('T')[0];
+    };
 
-    const rides = [
-        { id: uid(), driverId: demoId, from: '台北', to: '台中', date: fmt(d1), time: '08:00', seats: 3, price: 200, note: '准时出发，高速路走，约2小时', passengers: [], cancelled: false, createdAt: Date.now() - 300000 },
-        { id: uid(), driverId: demoId, from: '新竹', to: '高雄', date: fmt(d1), time: '09:30', seats: 2, price: 350, note: '走高速，可放行李', passengers: [], cancelled: false, createdAt: Date.now() - 200000 },
-        { id: uid(), driverId: demoId, from: '台北', to: '花莲', date: fmt(d2), time: '07:00', seats: 4, price: 0,   note: '免费共乘，一起去赏景！', passengers: [], cancelled: false, createdAt: Date.now() - 100000 },
-        { id: uid(), driverId: demoId, from: '台南', to: '台北', date: fmt(d3), time: '14:00', seats: 3, price: 300, note: '午后出发，预计傍晚到', passengers: [], cancelled: false, createdAt: Date.now() },
-    ];
-    DB.set(K.RIDES, rides);
+    DB.set(K.RIDES, [
+        { id: uid(), driverId: demoId, from: 'Kuala Lumpur', to: 'Penang',       date: addDays(1), time: '07:30', seats: 3, price: 50, note: 'Meeting point: TBS, Bandar Tasik Selatan. WhatsApp me to confirm.', passengers: [], cancelled: false, createdAt: Date.now() - 500000 },
+        { id: uid(), driverId: d2Id,   from: 'Kuala Lumpur', to: 'Johor Bahru',  date: addDays(1), time: '09:00', seats: 2, price: 45, note: 'Depart from Sunway area. Highway toll included in price.', passengers: [], cancelled: false, createdAt: Date.now() - 400000 },
+        { id: uid(), driverId: demoId, from: 'Kuala Lumpur', to: 'Ipoh',         date: addDays(2), time: '08:00', seats: 4, price: 30, note: 'North Plus highway. 2-hour drive. Can stop at Tapah R&R.', passengers: [], cancelled: false, createdAt: Date.now() - 300000 },
+        { id: uid(), driverId: d2Id,   from: 'Penang',       to: 'Kuala Lumpur', date: addDays(2), time: '14:00', seats: 3, price: 50, note: 'Return trip from Penang. Pickup at Komtar area.', passengers: [], cancelled: false, createdAt: Date.now() - 200000 },
+        { id: uid(), driverId: demoId, from: 'Kuala Lumpur', to: 'Melaka',       date: addDays(3), time: '10:00', seats: 4, price: 0,  note: 'Free ride, just sharing fuel cost vibes 🙂 Contact via WhatsApp.', passengers: [], cancelled: false, createdAt: Date.now() - 100000 },
+        { id: uid(), driverId: d2Id,   from: 'Ipoh',         to: 'Penang',       date: addDays(3), time: '11:30', seats: 2, price: 25, note: 'Around 1.5 hours drive. Comfortable SUV.', passengers: [], cancelled: false, createdAt: Date.now() },
+    ]);
 }
 
 // ===== Init =====
 function init() {
-    // Set default date min for post
     document.getElementById('post-date').min = todayStr();
-
     seedDemoData();
 
     if (currentUser) {
-        showScreen('home');
         document.getElementById('greeting-text').textContent = `你好，${currentUser.username} 👋`;
+        showScreen('home');
     } else {
         showScreen('auth');
     }
