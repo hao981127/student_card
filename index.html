@@ -1,0 +1,298 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="theme-color" content="#4F6CF7">
+    <title>拼车出行</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <!-- ===== Auth Screen ===== -->
+    <div id="screen-auth" class="screen">
+        <div class="auth-header">
+            <div class="app-logo">🚗</div>
+            <h1 class="app-title">拼车出行</h1>
+            <p class="app-subtitle">安全便捷的共乘平台</p>
+        </div>
+        <div class="auth-tabs">
+            <button class="auth-tab active" data-tab="login">登录</button>
+            <button class="auth-tab" data-tab="register">注册</button>
+        </div>
+        <div class="auth-form">
+            <div id="login-form">
+                <input type="text" id="login-username" placeholder="用户名" class="input-field" autocomplete="username">
+                <input type="password" id="login-password" placeholder="密码" class="input-field" autocomplete="current-password">
+                <button class="btn btn-white btn-full" id="btn-login">登录</button>
+                <p class="auth-hint">演示账号：demo / demo123</p>
+            </div>
+            <div id="register-form" style="display:none">
+                <input type="text" id="reg-username" placeholder="用户名" class="input-field" autocomplete="username">
+                <input type="tel" id="reg-phone" placeholder="手机号码" class="input-field" autocomplete="tel">
+                <input type="password" id="reg-password" placeholder="密码（至少6位）" class="input-field" autocomplete="new-password">
+                <input type="password" id="reg-confirm" placeholder="确认密码" class="input-field" autocomplete="new-password">
+                <button class="btn btn-white btn-full" id="btn-register">注册</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===== Home Screen ===== -->
+    <div id="screen-home" class="screen">
+        <div class="screen-header">
+            <div>
+                <p class="header-greeting" id="greeting-text">你好 👋</p>
+                <h2>找顺风车</h2>
+            </div>
+        </div>
+        <div class="search-box">
+            <div class="search-row">
+                <div class="search-icon from"><i class="fas fa-circle" style="font-size:10px"></i></div>
+                <input type="text" id="search-from" placeholder="出发地" class="search-input">
+                <button class="clear-btn" id="clear-from" style="display:none"><i class="fas fa-times-circle"></i></button>
+            </div>
+            <div class="search-connector">
+                <div class="connector-line"></div>
+                <button class="swap-btn" id="btn-swap"><i class="fas fa-exchange-alt fa-rotate-90"></i></button>
+            </div>
+            <div class="search-row">
+                <div class="search-icon to"><i class="fas fa-map-marker-alt"></i></div>
+                <input type="text" id="search-to" placeholder="目的地" class="search-input">
+                <button class="clear-btn" id="clear-to" style="display:none"><i class="fas fa-times-circle"></i></button>
+            </div>
+            <div class="search-divider"></div>
+            <div class="search-row">
+                <div class="search-icon date"><i class="fas fa-calendar-alt"></i></div>
+                <input type="date" id="search-date" class="search-input">
+            </div>
+            <button class="btn btn-primary btn-full mt-12" id="btn-search">
+                <i class="fas fa-search" style="margin-right:8px"></i>搜索行程
+            </button>
+        </div>
+        <div class="section-header">
+            <span class="section-title">可用行程</span>
+            <button class="text-btn" id="btn-clear-search" style="display:none">清除搜索</button>
+        </div>
+        <div id="rides-list" class="rides-list"></div>
+        <div id="no-rides" class="empty-state" style="display:none">
+            <i class="fas fa-car-side"></i>
+            <p>暂无行程</p>
+            <span>试试发布你自己的行程吧！</span>
+        </div>
+    </div>
+
+    <!-- ===== Post Screen ===== -->
+    <div id="screen-post" class="screen">
+        <div class="screen-header">
+            <h2>发布行程</h2>
+        </div>
+        <div class="form-container">
+            <div class="route-form-card">
+                <div class="form-group">
+                    <label><i class="fas fa-circle from-icon"></i> 出发地</label>
+                    <input type="text" id="post-from" placeholder="请输入出发城市或地点" class="input-field">
+                </div>
+                <div class="route-swap-area">
+                    <div class="route-connector"></div>
+                </div>
+                <div class="form-group">
+                    <label><i class="fas fa-map-marker-alt to-icon"></i> 目的地</label>
+                    <input type="text" id="post-to" placeholder="请输入目的城市或地点" class="input-field">
+                </div>
+            </div>
+            <div class="form-row mt-12">
+                <div class="form-group half">
+                    <label>出发日期</label>
+                    <input type="date" id="post-date" class="input-field">
+                </div>
+                <div class="form-group half">
+                    <label>出发时间</label>
+                    <input type="time" id="post-time" class="input-field">
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group half">
+                    <label>可乘座位</label>
+                    <select id="post-seats" class="input-field">
+                        <option value="1">1 座</option>
+                        <option value="2">2 座</option>
+                        <option value="3">3 座</option>
+                        <option value="4" selected>4 座</option>
+                    </select>
+                </div>
+                <div class="form-group half">
+                    <label>费用 / 人（元）</label>
+                    <input type="number" id="post-price" placeholder="0（免费）" class="input-field" min="0" step="1">
+                </div>
+            </div>
+            <div class="form-group">
+                <label>行程说明（选填）</label>
+                <textarea id="post-note" placeholder="例如：准时出发、可放行李、联系方式等..." class="input-field textarea"></textarea>
+            </div>
+            <button class="btn btn-primary btn-full" id="btn-post">
+                <i class="fas fa-plus" style="margin-right:8px"></i>发布行程
+            </button>
+        </div>
+    </div>
+
+    <!-- ===== My Rides Screen ===== -->
+    <div id="screen-my-rides" class="screen">
+        <div class="screen-header">
+            <h2>我的行程</h2>
+        </div>
+        <div class="tabs">
+            <button class="tab active" data-tab="posted">
+                <i class="fas fa-steering-wheel"></i> 我发布的
+            </button>
+            <button class="tab" data-tab="booked">
+                <i class="fas fa-ticket-alt"></i> 我预约的
+            </button>
+        </div>
+        <div id="my-posted-rides" class="rides-list pt-8"></div>
+        <div id="my-booked-rides" class="rides-list pt-8" style="display:none"></div>
+    </div>
+
+    <!-- ===== Profile Screen ===== -->
+    <div id="screen-profile" class="screen">
+        <div class="profile-hero">
+            <div class="avatar-large" id="profile-avatar">?</div>
+            <div class="profile-name" id="profile-name">用户</div>
+            <div class="profile-phone" id="profile-phone"></div>
+        </div>
+        <div class="stats-row">
+            <div class="stat-item">
+                <div class="stat-num" id="stat-posted">0</div>
+                <div class="stat-label">发布行程</div>
+            </div>
+            <div class="stat-divider"></div>
+            <div class="stat-item">
+                <div class="stat-num" id="stat-booked">0</div>
+                <div class="stat-label">预约次数</div>
+            </div>
+            <div class="stat-divider"></div>
+            <div class="stat-item">
+                <div class="stat-num" id="stat-completed">0</div>
+                <div class="stat-label">完成行程</div>
+            </div>
+        </div>
+        <div class="menu-list">
+            <div class="menu-item">
+                <div class="menu-icon" style="background:#EEF2FF"><i class="fas fa-star" style="color:#4F6CF7"></i></div>
+                <span>我的评价</span>
+                <i class="fas fa-chevron-right chevron"></i>
+            </div>
+            <div class="menu-item">
+                <div class="menu-icon" style="background:#FFF7ED"><i class="fas fa-shield-alt" style="color:#F97316"></i></div>
+                <span>安全信息</span>
+                <i class="fas fa-chevron-right chevron"></i>
+            </div>
+            <div class="menu-item">
+                <div class="menu-icon" style="background:#F0FDF4"><i class="fas fa-question-circle" style="color:#22C55E"></i></div>
+                <span>帮助中心</span>
+                <i class="fas fa-chevron-right chevron"></i>
+            </div>
+            <div class="menu-item">
+                <div class="menu-icon" style="background:#FFF1F2"><i class="fas fa-sign-out-alt" style="color:#F43F5E"></i></div>
+                <span>退出登录</span>
+                <i class="fas fa-chevron-right chevron"></i>
+            </div>
+        </div>
+    </div>
+
+    <!-- ===== Ride Detail Modal (Bottom Sheet) ===== -->
+    <div id="modal-ride-detail" class="modal">
+        <div class="modal-backdrop" id="modal-backdrop"></div>
+        <div class="modal-sheet">
+            <div class="modal-handle"></div>
+            <button class="modal-close" id="btn-close-detail"><i class="fas fa-times"></i></button>
+
+            <div class="detail-route">
+                <div class="detail-city">
+                    <div class="city-dot from-dot"></div>
+                    <span id="detail-from" class="city-name"></span>
+                </div>
+                <div class="detail-route-line">
+                    <div class="dashed-line"></div>
+                    <i class="fas fa-chevron-right" style="color:var(--text-muted);font-size:12px"></i>
+                </div>
+                <div class="detail-city">
+                    <div class="city-dot to-dot"></div>
+                    <span id="detail-to" class="city-name"></span>
+                </div>
+            </div>
+
+            <div id="detail-datetime" class="detail-datetime"></div>
+
+            <div id="detail-map-container">
+                <div id="detail-map"></div>
+            </div>
+
+            <div class="detail-info-grid">
+                <div class="info-card">
+                    <i class="fas fa-user"></i>
+                    <div>
+                        <div class="info-label">司机</div>
+                        <div class="info-value" id="detail-driver">—</div>
+                    </div>
+                </div>
+                <div class="info-card">
+                    <i class="fas fa-users"></i>
+                    <div>
+                        <div class="info-label">座位</div>
+                        <div class="info-value" id="detail-seats">—</div>
+                    </div>
+                </div>
+                <div class="info-card">
+                    <i class="fas fa-money-bill-wave"></i>
+                    <div>
+                        <div class="info-label">费用</div>
+                        <div class="info-value" id="detail-price">—</div>
+                    </div>
+                </div>
+                <div class="info-card" id="detail-note-card" style="display:none">
+                    <i class="fas fa-comment-dots"></i>
+                    <div>
+                        <div class="info-label">备注</div>
+                        <div class="info-value" id="detail-note">—</div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="passengers-section" style="display:none">
+                <div class="section-title small">乘客申请</div>
+                <div id="passengers-list"></div>
+            </div>
+
+            <button class="btn btn-primary btn-full" id="btn-book-ride">申请乘车</button>
+        </div>
+    </div>
+
+    <!-- ===== Bottom Navigation ===== -->
+    <nav class="bottom-nav" id="bottom-nav">
+        <button class="nav-item active" data-screen="home">
+            <i class="fas fa-search"></i>
+            <span>找车</span>
+        </button>
+        <button class="nav-item" data-screen="post">
+            <div class="nav-post-btn"><i class="fas fa-plus"></i></div>
+        </button>
+        <button class="nav-item" data-screen="my-rides">
+            <i class="fas fa-route"></i>
+            <span>行程</span>
+        </button>
+        <button class="nav-item" data-screen="profile">
+            <i class="fas fa-user"></i>
+            <span>我的</span>
+        </button>
+    </nav>
+
+    <!-- Toast -->
+    <div id="toast" class="toast"></div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="app.js"></script>
+</body>
+</html>
